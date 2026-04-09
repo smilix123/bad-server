@@ -2,32 +2,74 @@ import { NextFunction, Request, Response } from 'express'
 import { constants } from 'http2'
 import { Error as MongooseError } from 'mongoose'
 import { join } from 'path'
+import sanitizeHtml from 'sanitize-html'
 import BadRequestError from '../errors/bad-request-error'
 import ConflictError from '../errors/conflict-error'
 import NotFoundError from '../errors/not-found-error'
 import Product from '../models/product'
+import { getSortObject, parsePagination } from '../utils/filters'
 import movingFile from '../utils/movingFile'
+
+const cache = new Map<string, any>()
+const CACHE_TTL = 30 * 1000
 
 // GET /product
 const getProducts = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { page = 1, limit = 5 } = req.query
-        const options = {
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
+        const pagination = parsePagination(req.query, next)
+        if (!pagination) return
+
+        const cacheKey = `products_${pagination.page}_${pagination.limit}`
+
+        const cached = cache.get(cacheKey)
+        if (cached && cached.expiry > Date.now()) {
+            return res.send(cached.data)
         }
-        const products = await Product.find({}, null, options)
+
+        const sortOptions = {
+            allowedFields: [
+                'title',
+                'price',
+                'category',
+                'createdAt',
+            ] as string[],
+            defaultOrder: 'desc' as const,
+        }
+
+        const sort = getSortObject(
+            req.query.sortField,
+            req.query.sortOrder,
+            sortOptions,
+            next
+        )
+
+        if (sort === null) return
+
+        const products = await Product.find({}, null, {
+            sort,
+            skip: pagination.skip,
+            limit: pagination.limit,
+        })
+
         const totalProducts = await Product.countDocuments({})
-        const totalPages = Math.ceil(totalProducts / Number(limit))
-        return res.send({
+        const totalPages = Math.ceil(totalProducts / pagination.limit)
+
+        const response = {
             items: products,
             pagination: {
                 totalProducts,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: pagination.page,
+                pageSize: pagination.limit,
             },
+        }
+
+        cache.set(cacheKey, {
+            data: response,
+            expiry: Date.now() + CACHE_TTL,
         })
+
+        return res.send(response)
     } catch (err) {
         return next(err)
     }
@@ -42,8 +84,14 @@ const createProduct = async (
     try {
         const { description, category, price, title, image } = req.body
 
+        const sanitizedTitle = title ? sanitizeHtml(title) : title
+        const sanitizedDescription = description
+            ? sanitizeHtml(description)
+            : description
+        const sanitizedCategory = category ? sanitizeHtml(category) : category
+
         // Переносим картинку из временной папки
-        if (image) {
+        if (image?.fileName) {
             movingFile(
                 image.fileName,
                 join(__dirname, `../public/${process.env.UPLOAD_PATH_TEMP}`),
@@ -52,11 +100,11 @@ const createProduct = async (
         }
 
         const product = await Product.create({
-            description,
+            description: sanitizedDescription,
             image,
-            category,
+            category: sanitizedCategory,
             price,
-            title,
+            title: sanitizedTitle,
         })
         return res.status(constants.HTTP_STATUS_CREATED).send(product)
     } catch (error) {
@@ -72,8 +120,7 @@ const createProduct = async (
     }
 }
 
-// TODO: Добавить guard admin
-// PUT /product
+// PATCH /product
 const updateProduct = async (
     req: Request,
     res: Response,
@@ -81,10 +128,10 @@ const updateProduct = async (
 ) => {
     try {
         const { productId } = req.params
-        const { image } = req.body
+        const { title, description, category, price, image } = req.body
 
         // Переносим картинку из временной папки
-        if (image) {
+        if (image?.fileName) {
             movingFile(
                 image.fileName,
                 join(__dirname, `../public/${process.env.UPLOAD_PATH_TEMP}`),
@@ -92,17 +139,20 @@ const updateProduct = async (
             )
         }
 
-        const product = await Product.findByIdAndUpdate(
-            productId,
-            {
-                $set: {
-                    ...req.body,
-                    price: req.body.price ? req.body.price : null,
-                    image: req.body.image ? req.body.image : undefined,
-                },
-            },
-            { runValidators: true, new: true }
-        ).orFail(() => new NotFoundError('Нет товара по заданному id'))
+        const updateData: any = {}
+        if (title !== undefined) updateData.title = sanitizeHtml(title)
+        if (description !== undefined)
+            updateData.description = sanitizeHtml(description)
+        if (category !== undefined) updateData.category = sanitizeHtml(category)
+        if (price !== undefined)
+            updateData.price = price === null ? null : Number(price)
+        if (image !== undefined) updateData.image = image
+
+        const product = await Product.findByIdAndUpdate(productId, updateData, {
+            runValidators: true,
+            new: true,
+        }).orFail(() => new NotFoundError('Нет товара по заданному id'))
+
         return res.send(product)
     } catch (error) {
         if (error instanceof MongooseError.ValidationError) {
@@ -120,7 +170,6 @@ const updateProduct = async (
     }
 }
 
-// TODO: Добавить guard admin
 // DELETE /product
 const deleteProduct = async (
     req: Request,
