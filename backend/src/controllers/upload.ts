@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express'
+import { fileTypeFromBuffer } from 'file-type'
 import { promises as fs } from 'fs'
 import { constants } from 'http2'
 import { MAX_FILE_SIZE, MIN_FILE_SIZE } from '../config'
@@ -28,6 +29,37 @@ export const uploadFile = async (
                     `Файл слишком большой (макс. ${MAX_FILE_SIZE / 1024 / 1024} мегабайт)`
                 )
             )
+        }
+
+        let fileHandle: fs.FileHandle | undefined
+        try {
+            fileHandle = await fs.open(req.file.path, 'r')
+            const headerArray = new Uint8Array(4100)
+            const { bytesRead } = await fileHandle.read(headerArray, 0, 4100, 0)
+            const detectedType = await fileTypeFromBuffer(
+                headerArray.subarray(0, bytesRead)
+            )
+
+            const allowedImageTypes = [
+                'image/png',
+                'image/jpeg',
+                'image/jpg',
+                'image/gif',
+                'image/svg+xml',
+            ]
+            if (
+                !detectedType ||
+                !allowedImageTypes.includes(detectedType.mime)
+            ) {
+                await fs.unlink(req.file.path)
+                return next(
+                    new BadRequestError(
+                        'Загруженный файл не является допустимым изображением'
+                    )
+                )
+            }
+        } finally {
+            await fileHandle?.close()
         }
 
         // Формируем URL для клиента

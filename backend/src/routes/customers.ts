@@ -6,6 +6,7 @@ import {
     updateCustomer,
 } from '../controllers/customers'
 import auth, { roleGuardMiddleware } from '../middlewares/auth'
+import { adminLimiter } from '../middlewares/rate-limiter'
 import {
     validateObjectIdParam,
     validateSearchQuery,
@@ -19,6 +20,7 @@ customerRouter.get(
     '/',
     auth,
     roleGuardMiddleware(Role.Admin),
+    adminLimiter,
     validateSearchQuery,
     getCustomers
 )
