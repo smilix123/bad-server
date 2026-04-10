@@ -9,7 +9,6 @@ import {
     updateOrder,
 } from '../controllers/order'
 import auth, { roleGuardMiddleware } from '../middlewares/auth'
-import { verifyCsrf } from '../middlewares/csrf'
 import { createOrderLimiter, searchLimiter } from '../middlewares/rate-limiter'
 import {
     validateObjectIdParam,
@@ -21,14 +20,7 @@ import { Role } from '../models/user'
 
 const orderRouter = Router()
 
-orderRouter.post(
-    '/',
-    auth,
-    verifyCsrf,
-    createOrderLimiter,
-    validateOrderBody,
-    createOrder
-)
+orderRouter.post('/', auth, createOrderLimiter, validateOrderBody, createOrder)
 
 orderRouter.get(
     '/all',
