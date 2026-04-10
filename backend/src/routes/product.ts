@@ -6,8 +6,9 @@ import {
     updateProduct,
 } from '../controllers/products'
 import auth, { roleGuardMiddleware } from '../middlewares/auth'
+import { publicLimiter } from '../middlewares/rate-limiter'
 import {
-    validateObjId,
+    validateObjectIdParam,
     validateProductBody,
     validateProductUpdateBody,
 } from '../middlewares/validations'
@@ -15,7 +16,7 @@ import { Role } from '../models/user'
 
 const productRouter = Router()
 
-productRouter.get('/', getProducts)
+productRouter.get('/', publicLimiter, getProducts)
 productRouter.post(
     '/',
     auth,
@@ -23,18 +24,20 @@ productRouter.post(
     validateProductBody,
     createProduct
 )
+
 productRouter.delete(
     '/:productId',
     auth,
     roleGuardMiddleware(Role.Admin),
-    validateObjId,
+    validateObjectIdParam('productId'),
     deleteProduct
 )
+
 productRouter.patch(
     '/:productId',
     auth,
     roleGuardMiddleware(Role.Admin),
-    validateObjId,
+    validateObjectIdParam('productId'),
     validateProductUpdateBody,
     updateProduct
 )

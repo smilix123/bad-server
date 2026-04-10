@@ -9,15 +9,24 @@ import {
     updateCurrentUser,
 } from '../controllers/auth'
 import auth from '../middlewares/auth'
+import {
+    validateAuthentication, // нужен для логина
+    validateUserBody,
+    validateUserUpdate,
+} from '../middlewares/validations'
 
 const authRouter = Router()
 
+authRouter.get('/csrf-token', (req, res) => {
+    res.json({ csrfToken: req.csrfToken?.() })
+})
+
 authRouter.get('/user', auth, getCurrentUser)
-authRouter.patch('/me', auth, updateCurrentUser)
+authRouter.patch('/me', auth, validateUserUpdate, updateCurrentUser)
 authRouter.get('/user/roles', auth, getCurrentUserRoles)
-authRouter.post('/login', login)
+authRouter.post('/login', validateAuthentication, login)
+authRouter.post('/register', validateUserBody, register)
 authRouter.get('/token', refreshAccessToken)
 authRouter.get('/logout', logout)
-authRouter.post('/register', register)
 
 export default authRouter
